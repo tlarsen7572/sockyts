@@ -3,8 +3,13 @@ package sockyts
 import "sync"
 
 type Endpoint struct {
-	AyxReaders []AyxReader
-	AyxWriters []AyxWriter
+	AyxReaders []chan string
+	AyxWriters []*AyxWriter
+}
+
+type AyxWriter struct {
+	Closer    chan bool
+	WriteChan chan string
 }
 
 func NewServer() Server {
@@ -19,14 +24,21 @@ type server struct {
 	locker    *sync.Mutex
 }
 
-func (s *server) RegisterAyxReader(endpointName string, reader AyxReader) {
+func (s *server) RegisterAyxReader(endpointName string) <-chan string {
+	channel := make(chan string)
 	endpoint := s.registerEndpoint(endpointName)
-	endpoint.AyxReaders = append(endpoint.AyxReaders, reader)
+	endpoint.AyxReaders = append(endpoint.AyxReaders, channel)
+	return channel
 }
 
-func (s *server) RegisterAyxWriter(endpointName string, writer AyxWriter) {
+func (s *server) RegisterAyxWriter(endpointName string) (<-chan bool, chan<- string) {
+	writer := &AyxWriter{
+		Closer:    make(chan bool),
+		WriteChan: make(chan string),
+	}
 	endpoint := s.registerEndpoint(endpointName)
 	endpoint.AyxWriters = append(endpoint.AyxWriters, writer)
+	return writer.Closer, writer.WriteChan
 }
 
 func (s *server) registerEndpoint(endpointName string) *Endpoint {

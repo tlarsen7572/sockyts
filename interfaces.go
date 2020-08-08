@@ -1,15 +1,7 @@
 package sockyts
 
 type Server interface {
-	RegisterAyxReader(endpointName string, reader AyxReader)
-	RegisterAyxWriter(endpointName string, writer AyxWriter)
+	RegisterAyxReader(endpointName string) <-chan string
+	RegisterAyxWriter(endpointName string) (<-chan bool, chan<- string)
 	EndpointNames() []string
-}
-
-type AyxReader interface {
-	ValuePushed(string)
-}
-
-type AyxWriter interface {
-	Write(string)
 }
