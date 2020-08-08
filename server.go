@@ -4,6 +4,7 @@ import "sync"
 
 type Endpoint struct {
 	AyxReaders []AyxReader
+	AyxWriters []AyxWriter
 }
 
 func NewServer() Server {
@@ -19,6 +20,16 @@ type server struct {
 }
 
 func (s *server) RegisterAyxReader(endpointName string, reader AyxReader) {
+	endpoint := s.registerEndpoint(endpointName)
+	endpoint.AyxReaders = append(endpoint.AyxReaders, reader)
+}
+
+func (s *server) RegisterAyxWriter(endpointName string, writer AyxWriter) {
+	endpoint := s.registerEndpoint(endpointName)
+	endpoint.AyxWriters = append(endpoint.AyxWriters, writer)
+}
+
+func (s *server) registerEndpoint(endpointName string) *Endpoint {
 	s.locker.Lock()
 	endpoint, ok := s.endpoints[endpointName]
 	if !ok {
@@ -26,8 +37,7 @@ func (s *server) RegisterAyxReader(endpointName string, reader AyxReader) {
 		s.endpoints[endpointName] = endpoint
 	}
 	s.locker.Unlock()
-	endpoint.AyxReaders = append(endpoint.AyxReaders, reader)
-	return
+	return endpoint
 }
 
 func (s *server) EndpointNames() []string {
