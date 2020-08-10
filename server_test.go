@@ -34,7 +34,7 @@ func TestRegisterAyxWriter(t *testing.T) {
 	t.Logf(`endpoints: %v`, endPoints)
 }
 
-func TestAddClient(t *testing.T) {
+func TestAddClientAndReadMsg(t *testing.T) {
 	server := s.NewServer()
 	writeChan := server.RegisterAyxWriter(`test`)
 	server.Start()
@@ -46,5 +46,15 @@ func TestAddClient(t *testing.T) {
 	msg := <-clientRead
 	if msg != `hello world` {
 		t.Fatalf(`expected 'hello world' but got '%v'`, msg)
+	}
+}
+
+func TestAddClientToInvalidEndpoint(t *testing.T) {
+	server := s.NewServer()
+	_ = server.RegisterAyxWriter(`test`)
+	server.Start()
+	_, _, err := server.ConnectClient(`invalid`)
+	if err == nil {
+		t.Fatalf(`expected an error but got none`)
 	}
 }

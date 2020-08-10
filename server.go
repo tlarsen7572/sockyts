@@ -90,19 +90,23 @@ func (s *server) ConnectClient(endpointName string) (<-chan string, chan<- strin
 func (s *server) Start() {
 	for _, endpoint := range s.endpoints {
 		for _, writer := range endpoint.AyxWriters {
-			go func(w *AyxWriter) {
-				for msg := range w.WriteChan {
-					endpoint.AyxWriteChan <- msg
-				}
-			}(writer)
+			go s.forwardAyxWriter(endpoint, writer)
 		}
 
-		go func(e *Endpoint) {
-			for msg := range e.AyxWriteChan {
-				for _, clientReader := range e.Clients {
-					clientReader.ReadChan <- msg
-				}
-			}
-		}(endpoint)
+		go s.clientWriteLoop(endpoint)
+	}
+}
+
+func (s *server) forwardAyxWriter(endpoint *Endpoint, writer *AyxWriter) {
+	for msg := range writer.WriteChan {
+		endpoint.AyxWriteChan <- msg
+	}
+}
+
+func (s *server) clientWriteLoop(endpoint *Endpoint) {
+	for msg := range endpoint.AyxWriteChan {
+		for _, clientReader := range endpoint.Clients {
+			clientReader.ReadChan <- msg
+		}
 	}
 }
