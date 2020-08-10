@@ -9,6 +9,7 @@ type Endpoint struct {
 	AyxReaders   []chan string
 	AyxWriters   []*AyxWriter
 	AyxWriteChan chan string
+	AyxReadChan  chan string
 	Clients      []*SockytClient
 }
 
@@ -55,6 +56,7 @@ func (s *server) registerEndpoint(endpointName string) *Endpoint {
 	if !ok {
 		endpoint = &Endpoint{
 			AyxWriteChan: make(chan string),
+			AyxReadChan:  make(chan string),
 		}
 		s.endpoints[endpointName] = endpoint
 	}
@@ -84,6 +86,7 @@ func (s *server) ConnectClient(endpointName string) (<-chan string, chan<- strin
 		WriteChan: make(chan string),
 	}
 	endpoint.Clients = append(endpoint.Clients, client)
+	go s.forwardClientWriter(endpoint, client)
 	return client.ReadChan, client.WriteChan, nil
 }
 
@@ -93,7 +96,8 @@ func (s *server) Start() {
 			go s.forwardAyxWriter(endpoint, writer)
 		}
 
-		go s.clientWriteLoop(endpoint)
+		go s.writeToClientLoop(endpoint)
+		go s.readFromClientLoop(endpoint)
 	}
 }
 
@@ -103,10 +107,25 @@ func (s *server) forwardAyxWriter(endpoint *Endpoint, writer *AyxWriter) {
 	}
 }
 
-func (s *server) clientWriteLoop(endpoint *Endpoint) {
+func (s *server) forwardClientWriter(endpoint *Endpoint, client *SockytClient) {
+	for msg := range client.WriteChan {
+		endpoint.AyxReadChan <- msg
+	}
+
+}
+
+func (s *server) writeToClientLoop(endpoint *Endpoint) {
 	for msg := range endpoint.AyxWriteChan {
 		for _, clientReader := range endpoint.Clients {
 			clientReader.ReadChan <- msg
+		}
+	}
+}
+
+func (s *server) readFromClientLoop(endpoint *Endpoint) {
+	for msg := range endpoint.AyxReadChan {
+		for _, ayxReader := range endpoint.AyxReaders {
+			ayxReader <- msg
 		}
 	}
 }

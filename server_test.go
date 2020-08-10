@@ -58,3 +58,38 @@ func TestAddClientToInvalidEndpoint(t *testing.T) {
 		t.Fatalf(`expected an error but got none`)
 	}
 }
+
+func TestAddClientAndWriteMsg(t *testing.T) {
+	server := s.NewServer()
+	readChan := server.RegisterAyxReader(`test`)
+	server.Start()
+	_, clientWrite, err := server.ConnectClient(`test`)
+	if err != nil {
+		t.Fatalf(`expected no error but got: %v`, err.Error())
+	}
+	clientWrite <- `hello world`
+	msg := <-readChan
+	if msg != `hello world` {
+		t.Fatalf(`expected 'hello world' but got '%v'`, msg)
+	}
+}
+
+func TestAddClientAndWriteMsgNoAyxReaders(t *testing.T) {
+	server := s.NewServer()
+	_ = server.RegisterAyxWriter(`test`)
+	server.Start()
+	_, clientWrite, err := server.ConnectClient(`test`)
+	if err != nil {
+		t.Fatalf(`expected no error but got: %v`, err.Error())
+	}
+	clientWrite <- `hello world`
+	t.Logf(`finished without deadlocks`)
+}
+
+func TestWriteWithNoClients(t *testing.T) {
+	server := s.NewServer()
+	writeChan := server.RegisterAyxWriter(`test`)
+	server.Start()
+	writeChan <- `hello world`
+	t.Logf(`finished without deadlocks`)
+}
