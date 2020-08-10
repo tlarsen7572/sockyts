@@ -26,10 +26,25 @@ func TestRegister2AyxReaderEndpoints(t *testing.T) {
 
 func TestRegisterAyxWriter(t *testing.T) {
 	server := s.NewServer()
-	_, _ = server.RegisterAyxWriter(`test`)
+	_ = server.RegisterAyxWriter(`test`)
 	endPoints := server.EndpointNames()
 	if count := len(endPoints); count != 1 {
 		t.Fatalf(`expected 1 endpoint but got %v`, count)
 	}
 	t.Logf(`endpoints: %v`, endPoints)
+}
+
+func TestAddClient(t *testing.T) {
+	server := s.NewServer()
+	writeChan := server.RegisterAyxWriter(`test`)
+	server.Start()
+	clientRead, _, err := server.ConnectClient(`test`)
+	if err != nil {
+		t.Fatalf(`expected no error but got %v`, err.Error())
+	}
+	writeChan <- `hello world`
+	msg := <-clientRead
+	if msg != `hello world` {
+		t.Fatalf(`expected 'hello world' but got '%v'`, msg)
+	}
 }

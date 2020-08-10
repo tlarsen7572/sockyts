@@ -1,14 +1,23 @@
 package sockyts
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 type Endpoint struct {
-	AyxReaders []chan string
-	AyxWriters []*AyxWriter
+	AyxReaders   []chan string
+	AyxWriters   []*AyxWriter
+	AyxWriteChan chan string
+	Clients      []*SockytClient
 }
 
 type AyxWriter struct {
-	Closer    chan bool
+	WriteChan chan string
+}
+
+type SockytClient struct {
+	ReadChan  chan string
 	WriteChan chan string
 }
 
@@ -31,21 +40,22 @@ func (s *server) RegisterAyxReader(endpointName string) <-chan string {
 	return channel
 }
 
-func (s *server) RegisterAyxWriter(endpointName string) (<-chan bool, chan<- string) {
+func (s *server) RegisterAyxWriter(endpointName string) chan<- string {
 	writer := &AyxWriter{
-		Closer:    make(chan bool),
 		WriteChan: make(chan string),
 	}
 	endpoint := s.registerEndpoint(endpointName)
 	endpoint.AyxWriters = append(endpoint.AyxWriters, writer)
-	return writer.Closer, writer.WriteChan
+	return writer.WriteChan
 }
 
 func (s *server) registerEndpoint(endpointName string) *Endpoint {
 	s.locker.Lock()
 	endpoint, ok := s.endpoints[endpointName]
 	if !ok {
-		endpoint = &Endpoint{}
+		endpoint = &Endpoint{
+			AyxWriteChan: make(chan string),
+		}
 		s.endpoints[endpointName] = endpoint
 	}
 	s.locker.Unlock()
@@ -60,4 +70,39 @@ func (s *server) EndpointNames() []string {
 		i++
 	}
 	return endpointNames
+}
+
+func (s *server) ConnectClient(endpointName string) (<-chan string, chan<- string, error) {
+	s.locker.Lock()
+	endpoint, ok := s.endpoints[endpointName]
+	s.locker.Unlock()
+	if !ok {
+		return nil, nil, fmt.Errorf(`endpoint %v is not valid`, endpointName)
+	}
+	client := &SockytClient{
+		ReadChan:  make(chan string),
+		WriteChan: make(chan string),
+	}
+	endpoint.Clients = append(endpoint.Clients, client)
+	return client.ReadChan, client.WriteChan, nil
+}
+
+func (s *server) Start() {
+	for _, endpoint := range s.endpoints {
+		for _, writer := range endpoint.AyxWriters {
+			go func(w *AyxWriter) {
+				for msg := range w.WriteChan {
+					endpoint.AyxWriteChan <- msg
+				}
+			}(writer)
+		}
+
+		go func(e *Endpoint) {
+			for msg := range e.AyxWriteChan {
+				for _, clientReader := range e.Clients {
+					clientReader.ReadChan <- msg
+				}
+			}
+		}(endpoint)
+	}
 }
