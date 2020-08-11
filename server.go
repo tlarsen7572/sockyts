@@ -118,8 +118,8 @@ func (s *server) forwardClientWriter(endpoint *Endpoint, client *SockytClient) {
 		endpoint.AyxReadChan <- msg
 	}
 	endpoint.locker.Lock()
-	close(client.ReadChan)
 	delete(endpoint.Clients, client)
+	close(client.ReadChan)
 	endpoint.locker.Unlock()
 }
 

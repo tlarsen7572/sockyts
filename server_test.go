@@ -1,6 +1,9 @@
 package sockyts_test
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 import s "sockyts"
 
 func TestRegisterAyxReader(t *testing.T) {
@@ -105,5 +108,6 @@ func TestClosingClientWriteChannelRemovesClientFromEndpoint(t *testing.T) {
 		t.Fatalf(`clientRead was not closed but it should have been`)
 	}
 	writeChan <- `hello world`
+	time.Sleep(300 * time.Millisecond)
 	t.Logf(`no panic, we didn't send 'hello world' to the closed reader`)
 }
