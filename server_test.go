@@ -93,3 +93,17 @@ func TestWriteWithNoClients(t *testing.T) {
 	writeChan <- `hello world`
 	t.Logf(`finished without deadlocks`)
 }
+
+func TestClosingClientWriteChannelRemovesClientFromEndpoint(t *testing.T) {
+	server := s.NewServer()
+	writeChan := server.RegisterAyxWriter(`test`)
+	server.Start()
+	clientRead, clientWrite, _ := server.ConnectClient(`test`)
+	close(clientWrite)
+	_, ok := <-clientRead
+	if ok {
+		t.Fatalf(`clientRead was not closed but it should have been`)
+	}
+	writeChan <- `hello world`
+	t.Logf(`no panic, we didn't send 'hello world' to the closed reader`)
+}

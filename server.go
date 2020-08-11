@@ -10,7 +10,8 @@ type Endpoint struct {
 	AyxWriters   []*AyxWriter
 	AyxWriteChan chan string
 	AyxReadChan  chan string
-	Clients      []*SockytClient
+	Clients      map[*SockytClient]bool
+	locker       *sync.Mutex
 }
 
 type AyxWriter struct {
@@ -20,6 +21,7 @@ type AyxWriter struct {
 type SockytClient struct {
 	ReadChan  chan string
 	WriteChan chan string
+	index     int
 }
 
 func NewServer() Server {
@@ -57,6 +59,8 @@ func (s *server) registerEndpoint(endpointName string) *Endpoint {
 		endpoint = &Endpoint{
 			AyxWriteChan: make(chan string),
 			AyxReadChan:  make(chan string),
+			Clients:      make(map[*SockytClient]bool),
+			locker:       &sync.Mutex{},
 		}
 		s.endpoints[endpointName] = endpoint
 	}
@@ -81,11 +85,13 @@ func (s *server) ConnectClient(endpointName string) (<-chan string, chan<- strin
 	if !ok {
 		return nil, nil, fmt.Errorf(`endpoint %v is not valid`, endpointName)
 	}
+
 	client := &SockytClient{
 		ReadChan:  make(chan string),
 		WriteChan: make(chan string),
 	}
-	endpoint.Clients = append(endpoint.Clients, client)
+	endpoint.Clients[client] = true
+
 	go s.forwardClientWriter(endpoint, client)
 	return client.ReadChan, client.WriteChan, nil
 }
@@ -111,12 +117,15 @@ func (s *server) forwardClientWriter(endpoint *Endpoint, client *SockytClient) {
 	for msg := range client.WriteChan {
 		endpoint.AyxReadChan <- msg
 	}
-
+	endpoint.locker.Lock()
+	close(client.ReadChan)
+	delete(endpoint.Clients, client)
+	endpoint.locker.Unlock()
 }
 
 func (s *server) writeToClientLoop(endpoint *Endpoint) {
 	for msg := range endpoint.AyxWriteChan {
-		for _, clientReader := range endpoint.Clients {
+		for clientReader := range endpoint.Clients {
 			clientReader.ReadChan <- msg
 		}
 	}
