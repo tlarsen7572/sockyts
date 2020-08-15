@@ -8,8 +8,12 @@ import s "sockyts"
 
 func TestRegisterAyxReader(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxReader(`test`)
-	endPoints := server.EndpointNames()
+	_ = server.RegisterAyxReader(`address`, `test`)
+	addresses := server.AddressNames()
+	if count := len(addresses); count != 1 {
+		t.Fatalf(`expected 1 address but got %v`, count)
+	}
+	endPoints := server.EndpointNames(`address`)
 	if count := len(endPoints); count != 1 {
 		t.Fatalf(`expected 1 endpoint but got %v`, count)
 	}
@@ -18,9 +22,13 @@ func TestRegisterAyxReader(t *testing.T) {
 
 func TestRegister2AyxReaderEndpoints(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxReader(`test1`)
-	_ = server.RegisterAyxReader(`test2`)
-	endPoints := server.EndpointNames()
+	_ = server.RegisterAyxReader(`address`, `test1`)
+	_ = server.RegisterAyxReader(`address`, `test2`)
+	addresses := server.AddressNames()
+	if count := len(addresses); count != 1 {
+		t.Fatalf(`expected 1 address but got %v`, count)
+	}
+	endPoints := server.EndpointNames(`address`)
 	if count := len(endPoints); count != 2 {
 		t.Fatalf(`expected 1 endpoint but got %v`, count)
 	}
@@ -29,8 +37,12 @@ func TestRegister2AyxReaderEndpoints(t *testing.T) {
 
 func TestRegisterAyxWriter(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxWriter(`test`)
-	endPoints := server.EndpointNames()
+	_ = server.RegisterAyxWriter(`address`, `test`)
+	addresses := server.AddressNames()
+	if count := len(addresses); count != 1 {
+		t.Fatalf(`expected 1 address but got %v`, count)
+	}
+	endPoints := server.EndpointNames(`address`)
 	if count := len(endPoints); count != 1 {
 		t.Fatalf(`expected 1 endpoint but got %v`, count)
 	}
@@ -39,9 +51,9 @@ func TestRegisterAyxWriter(t *testing.T) {
 
 func TestAddClientAndReadMsg(t *testing.T) {
 	server := s.NewServer()
-	writeChan := server.RegisterAyxWriter(`test`)
+	writeChan := server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
-	clientRead, _, err := server.ConnectClient(`test`)
+	clientRead, _, err := server.ConnectClient(`address`, `test`)
 	if err != nil {
 		t.Fatalf(`expected no error but got %v`, err.Error())
 	}
@@ -54,9 +66,9 @@ func TestAddClientAndReadMsg(t *testing.T) {
 
 func TestAddClientToInvalidEndpoint(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxWriter(`test`)
+	_ = server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
-	_, _, err := server.ConnectClient(`invalid`)
+	_, _, err := server.ConnectClient(`address`, `invalid`)
 	if err == nil {
 		t.Fatalf(`expected an error but got none`)
 	}
@@ -64,9 +76,9 @@ func TestAddClientToInvalidEndpoint(t *testing.T) {
 
 func TestAddClientAndWriteMsg(t *testing.T) {
 	server := s.NewServer()
-	readChan := server.RegisterAyxReader(`test`)
+	readChan := server.RegisterAyxReader(`address`, `test`)
 	server.Start()
-	_, clientWrite, err := server.ConnectClient(`test`)
+	_, clientWrite, err := server.ConnectClient(`address`, `test`)
 	if err != nil {
 		t.Fatalf(`expected no error but got: %v`, err.Error())
 	}
@@ -79,9 +91,9 @@ func TestAddClientAndWriteMsg(t *testing.T) {
 
 func TestAddClientAndWriteMsgNoAyxReaders(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxWriter(`test`)
+	_ = server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
-	_, clientWrite, err := server.ConnectClient(`test`)
+	_, clientWrite, err := server.ConnectClient(`address`, `test`)
 	if err != nil {
 		t.Fatalf(`expected no error but got: %v`, err.Error())
 	}
@@ -91,7 +103,7 @@ func TestAddClientAndWriteMsgNoAyxReaders(t *testing.T) {
 
 func TestWriteWithNoClients(t *testing.T) {
 	server := s.NewServer()
-	writeChan := server.RegisterAyxWriter(`test`)
+	writeChan := server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
 	writeChan <- `hello world`
 	t.Logf(`finished without deadlocks`)
@@ -99,9 +111,9 @@ func TestWriteWithNoClients(t *testing.T) {
 
 func TestClosingClientWriteChannelRemovesClientFromEndpoint(t *testing.T) {
 	server := s.NewServer()
-	writeChan := server.RegisterAyxWriter(`test`)
+	writeChan := server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
-	clientRead, clientWrite, _ := server.ConnectClient(`test`)
+	clientRead, clientWrite, _ := server.ConnectClient(`address`, `test`)
 	close(clientWrite)
 	_, ok := <-clientRead
 	if ok {

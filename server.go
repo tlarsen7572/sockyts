@@ -5,6 +5,11 @@ import (
 	"sync"
 )
 
+type Address struct {
+	Endpoints map[string]*Endpoint
+	locker    *sync.Mutex
+}
+
 type Endpoint struct {
 	AyxReaders   []chan string
 	AyxWriters   []*AyxWriter
@@ -26,35 +31,51 @@ type SockytClient struct {
 
 func NewServer() Server {
 	return &server{
-		endpoints: map[string]*Endpoint{},
+		addresses: map[string]*Address{},
 		locker:    &sync.Mutex{},
 	}
 }
 
 type server struct {
-	endpoints map[string]*Endpoint
+	addresses map[string]*Address
 	locker    *sync.Mutex
 }
 
-func (s *server) RegisterAyxReader(endpointName string) <-chan string {
+func (s *server) RegisterAyxReader(addressName string, endpointName string) <-chan string {
 	channel := make(chan string)
-	endpoint := s.registerEndpoint(endpointName)
+	address := s.registerAddress(addressName)
+	endpoint := address.registerEndpoint(endpointName)
 	endpoint.AyxReaders = append(endpoint.AyxReaders, channel)
 	return channel
 }
 
-func (s *server) RegisterAyxWriter(endpointName string) chan<- string {
+func (s *server) RegisterAyxWriter(addressName string, endpointName string) chan<- string {
 	writer := &AyxWriter{
 		WriteChan: make(chan string),
 	}
-	endpoint := s.registerEndpoint(endpointName)
+	address := s.registerAddress(addressName)
+	endpoint := address.registerEndpoint(endpointName)
 	endpoint.AyxWriters = append(endpoint.AyxWriters, writer)
 	return writer.WriteChan
 }
 
-func (s *server) registerEndpoint(endpointName string) *Endpoint {
+func (s *server) registerAddress(addressName string) *Address {
 	s.locker.Lock()
-	endpoint, ok := s.endpoints[endpointName]
+	address, ok := s.addresses[addressName]
+	if !ok {
+		address = &Address{
+			Endpoints: make(map[string]*Endpoint),
+			locker:    &sync.Mutex{},
+		}
+		s.addresses[addressName] = address
+	}
+	s.locker.Unlock()
+	return address
+}
+
+func (a *Address) registerEndpoint(endpointName string) *Endpoint {
+	a.locker.Lock()
+	endpoint, ok := a.Endpoints[endpointName]
 	if !ok {
 		endpoint = &Endpoint{
 			AyxWriteChan: make(chan string),
@@ -62,26 +83,46 @@ func (s *server) registerEndpoint(endpointName string) *Endpoint {
 			Clients:      make(map[*SockytClient]bool),
 			locker:       &sync.Mutex{},
 		}
-		s.endpoints[endpointName] = endpoint
+		a.Endpoints[endpointName] = endpoint
 	}
-	s.locker.Unlock()
+	a.locker.Unlock()
 	return endpoint
 }
 
-func (s *server) EndpointNames() []string {
-	endpointNames := make([]string, len(s.endpoints))
+func (s *server) EndpointNames(addressName string) []string {
+	address, ok := s.addresses[addressName]
+	if !ok {
+		return nil
+	}
+	endpointNames := make([]string, len(address.Endpoints))
 	i := 0
-	for key := range s.endpoints {
+	for key := range address.Endpoints {
 		endpointNames[i] = key
 		i++
 	}
 	return endpointNames
 }
 
-func (s *server) ConnectClient(endpointName string) (<-chan string, chan<- string, error) {
+func (s *server) AddressNames() []string {
+	addressNames := make([]string, len(s.addresses))
+	i := 0
+	for key := range s.addresses {
+		addressNames[i] = key
+		i++
+	}
+	return addressNames
+}
+
+func (s *server) ConnectClient(addressName string, endpointName string) (<-chan string, chan<- string, error) {
 	s.locker.Lock()
-	endpoint, ok := s.endpoints[endpointName]
+	address, ok := s.addresses[addressName]
 	s.locker.Unlock()
+	if !ok {
+		return nil, nil, fmt.Errorf(`address %v is not valid`, addressName)
+	}
+	address.locker.Lock()
+	endpoint, ok := address.Endpoints[endpointName]
+	address.locker.Unlock()
 	if !ok {
 		return nil, nil, fmt.Errorf(`endpoint %v is not valid`, endpointName)
 	}
@@ -97,13 +138,15 @@ func (s *server) ConnectClient(endpointName string) (<-chan string, chan<- strin
 }
 
 func (s *server) Start() {
-	for _, endpoint := range s.endpoints {
-		for _, writer := range endpoint.AyxWriters {
-			go s.forwardAyxWriter(endpoint, writer)
-		}
+	for _, address := range s.addresses {
+		for _, endpoint := range address.Endpoints {
+			for _, writer := range endpoint.AyxWriters {
+				go s.forwardAyxWriter(endpoint, writer)
+			}
 
-		go s.writeToClientLoop(endpoint)
-		go s.readFromClientLoop(endpoint)
+			go s.writeToClientLoop(endpoint)
+			go s.readFromClientLoop(endpoint)
+		}
 	}
 }
 
