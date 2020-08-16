@@ -1,6 +1,7 @@
 package sockyts_test
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -37,7 +38,7 @@ func TestRegister2AyxReaderEndpoints(t *testing.T) {
 
 func TestRegisterAyxWriter(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxWriter(`address`, `test`)
+	_, _ = server.RegisterAyxWriter(`address`, `test`)
 	addresses := server.AddressNames()
 	if count := len(addresses); count != 1 {
 		t.Fatalf(`expected 1 address but got %v`, count)
@@ -51,7 +52,7 @@ func TestRegisterAyxWriter(t *testing.T) {
 
 func TestAddClientAndReadMsg(t *testing.T) {
 	server := s.NewServer()
-	writeChan := server.RegisterAyxWriter(`address`, `test`)
+	writeChan, _ := server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
 	clientRead, _, err := server.ConnectClient(`address`, `test`)
 	if err != nil {
@@ -66,7 +67,7 @@ func TestAddClientAndReadMsg(t *testing.T) {
 
 func TestAddClientToInvalidEndpoint(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxWriter(`address`, `test`)
+	_, _ = server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
 	_, _, err := server.ConnectClient(`address`, `invalid`)
 	if err == nil {
@@ -91,7 +92,7 @@ func TestAddClientAndWriteMsg(t *testing.T) {
 
 func TestAddClientAndWriteMsgNoAyxReaders(t *testing.T) {
 	server := s.NewServer()
-	_ = server.RegisterAyxWriter(`address`, `test`)
+	_, _ = server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
 	_, clientWrite, err := server.ConnectClient(`address`, `test`)
 	if err != nil {
@@ -103,7 +104,7 @@ func TestAddClientAndWriteMsgNoAyxReaders(t *testing.T) {
 
 func TestWriteWithNoClients(t *testing.T) {
 	server := s.NewServer()
-	writeChan := server.RegisterAyxWriter(`address`, `test`)
+	writeChan, _ := server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
 	writeChan <- `hello world`
 	t.Logf(`finished without deadlocks`)
@@ -111,7 +112,7 @@ func TestWriteWithNoClients(t *testing.T) {
 
 func TestClosingClientWriteChannelRemovesClientFromEndpoint(t *testing.T) {
 	server := s.NewServer()
-	writeChan := server.RegisterAyxWriter(`address`, `test`)
+	writeChan, _ := server.RegisterAyxWriter(`address`, `test`)
 	server.Start()
 	clientRead, clientWrite, _ := server.ConnectClient(`address`, `test`)
 	close(clientWrite)
@@ -122,4 +123,76 @@ func TestClosingClientWriteChannelRemovesClientFromEndpoint(t *testing.T) {
 	writeChan <- `hello world`
 	time.Sleep(300 * time.Millisecond)
 	t.Logf(`no panic, we didn't send 'hello world' to the closed reader`)
+}
+
+func TestShutdownServer(t *testing.T) {
+	server := s.NewServer()
+	ayxWriter, ayxCloser := server.RegisterAyxWriter(`address`, `test`)
+	server.Start()
+	clientReader, _, _ := server.ConnectClient(`address`, `test`)
+	server.Shutdown()
+	ayxWriter <- `hello world`
+	_, ok := <-ayxCloser
+	if ok {
+		t.Fatalf(`expected the ayxCloser channel to close but it did not`)
+	}
+	msg, ok := <-clientReader
+	if ok {
+		t.Logf(`msg received by client: %v`, msg)
+		t.Fatalf(`expected the clientReader channel to close but it did not`)
+	}
+}
+
+func TestAddClientAfterShutdown(t *testing.T) {
+	server := s.NewServer()
+	_, _ = server.RegisterAyxWriter(`address`, `test`)
+	server.Start()
+	server.Shutdown()
+	_, _, err := server.ConnectClient(`address`, `test`)
+	if err == nil {
+		t.Fatalf(`expected an error but got non`)
+	}
+	t.Logf(`error %v`, err.Error())
+}
+
+func TestSpinUpFor1Second(t *testing.T) {
+	server := s.NewServer()
+	ayxWriter, ayxCloser := server.RegisterAyxWriter(`address`, `test`)
+	server.Start()
+	go func() {
+		innerSleepChan := make(chan bool)
+		i := 0
+		for {
+			go func() {
+				time.Sleep(10 * time.Millisecond)
+				innerSleepChan <- true
+			}()
+			select {
+			case <-ayxCloser:
+				close(ayxWriter)
+				return
+			case <-innerSleepChan:
+				ayxWriter <- strconv.Itoa(i)
+				i++
+			}
+		}
+	}()
+	clientRead, _, err := server.ConnectClient(`address`, `test`)
+	if err != nil {
+		t.Fatalf(`expected no error but got: %v`, err.Error())
+	}
+	outerSleepChan := make(chan string)
+	go func() {
+		time.Sleep(1 * time.Second)
+		close(outerSleepChan)
+	}()
+	for {
+		select {
+		case <-outerSleepChan:
+			server.Shutdown()
+			return
+		case msg := <-clientRead:
+			t.Logf(msg)
+		}
+	}
 }

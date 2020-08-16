@@ -21,6 +21,7 @@ type Endpoint struct {
 
 type AyxWriter struct {
 	WriteChan chan string
+	CloseChan chan bool
 }
 
 type SockytClient struct {
@@ -37,8 +38,9 @@ func NewServer() Server {
 }
 
 type server struct {
-	addresses map[string]*Address
-	locker    *sync.Mutex
+	addresses     map[string]*Address
+	locker        *sync.Mutex
+	canAddClients bool
 }
 
 func (s *server) RegisterAyxReader(addressName string, endpointName string) <-chan string {
@@ -49,14 +51,15 @@ func (s *server) RegisterAyxReader(addressName string, endpointName string) <-ch
 	return channel
 }
 
-func (s *server) RegisterAyxWriter(addressName string, endpointName string) chan<- string {
+func (s *server) RegisterAyxWriter(addressName string, endpointName string) (chan<- string, <-chan bool) {
 	writer := &AyxWriter{
 		WriteChan: make(chan string),
+		CloseChan: make(chan bool),
 	}
 	address := s.registerAddress(addressName)
 	endpoint := address.registerEndpoint(endpointName)
 	endpoint.AyxWriters = append(endpoint.AyxWriters, writer)
-	return writer.WriteChan
+	return writer.WriteChan, writer.CloseChan
 }
 
 func (s *server) registerAddress(addressName string) *Address {
@@ -131,7 +134,15 @@ func (s *server) ConnectClient(addressName string, endpointName string) (<-chan 
 		ReadChan:  make(chan string),
 		WriteChan: make(chan string),
 	}
+
+	s.locker.Lock()
+	okToAdd := s.canAddClients
+	if !okToAdd {
+		s.locker.Unlock()
+		return nil, nil, fmt.Errorf(`server is not accepting clients`)
+	}
 	endpoint.Clients[client] = true
+	s.locker.Unlock()
 
 	go s.forwardClientWriter(endpoint, client)
 	return client.ReadChan, client.WriteChan, nil
@@ -148,6 +159,9 @@ func (s *server) Start() {
 			go s.readFromClientLoop(endpoint)
 		}
 	}
+	s.locker.Lock()
+	s.canAddClients = true
+	s.locker.Unlock()
 }
 
 func (s *server) forwardAyxWriter(endpoint *Endpoint, writer *AyxWriter) {
@@ -160,9 +174,16 @@ func (s *server) forwardClientWriter(endpoint *Endpoint, client *SockytClient) {
 	for msg := range client.WriteChan {
 		endpoint.AyxReadChan <- msg
 	}
+	endpoint.tryDisconnectClient(client)
+}
+
+func (endpoint *Endpoint) tryDisconnectClient(client *SockytClient) {
 	endpoint.locker.Lock()
-	delete(endpoint.Clients, client)
-	close(client.ReadChan)
+	_, ok := endpoint.Clients[client]
+	if ok {
+		delete(endpoint.Clients, client)
+		close(client.ReadChan)
+	}
 	endpoint.locker.Unlock()
 }
 
@@ -172,12 +193,32 @@ func (s *server) writeToClientLoop(endpoint *Endpoint) {
 			clientReader.ReadChan <- msg
 		}
 	}
+	for clientReader := range endpoint.Clients {
+		close(clientReader.ReadChan)
+	}
 }
 
 func (s *server) readFromClientLoop(endpoint *Endpoint) {
 	for msg := range endpoint.AyxReadChan {
 		for _, ayxReader := range endpoint.AyxReaders {
 			ayxReader <- msg
+		}
+	}
+}
+
+func (s *server) Shutdown() {
+	s.locker.Lock()
+	s.canAddClients = false
+	s.locker.Unlock()
+
+	for _, address := range s.addresses {
+		for _, endpoint := range address.Endpoints {
+			for client := range endpoint.Clients {
+				endpoint.tryDisconnectClient(client)
+			}
+			for _, ayxWriter := range endpoint.AyxWriters {
+				close(ayxWriter.CloseChan)
+			}
 		}
 	}
 }
