@@ -1,7 +1,9 @@
 package sockyts
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"sync"
 )
 
@@ -11,12 +13,13 @@ const (
 	NotStarted ServerStatus = 0
 	Running    ServerStatus = 1
 	Closed     ServerStatus = 2
-	Error      ServerStatus = 3
 )
 
 type Address struct {
 	Endpoints map[string]*Endpoint
 	locker    *sync.Mutex
+	mux       *http.ServeMux
+	server    *http.Server
 }
 
 type Endpoint struct {
@@ -165,7 +168,10 @@ func (s *server) Start() {
 		return
 	}
 
-	for _, address := range s.addresses {
+	for addressName, address := range s.addresses {
+		address.mux = http.NewServeMux()
+		address.server = &http.Server{Addr: addressName, Handler: address.mux}
+		address.mux.HandleFunc(addressName, func(w http.ResponseWriter, r *http.Request) {})
 		for _, endpoint := range address.Endpoints {
 			for _, writer := range endpoint.AyxWriters {
 				go s.forwardAyxWriter(endpoint, writer)
@@ -174,6 +180,9 @@ func (s *server) Start() {
 			go s.writeToClientLoop(endpoint)
 			go s.readFromClientLoop(endpoint)
 		}
+		go func(a *Address) {
+			_ = a.server.ListenAndServe()
+		}(address)
 	}
 	s.status = Running
 }
@@ -238,5 +247,6 @@ func (s *server) Shutdown() {
 				close(ayxWriter.CloseChan)
 			}
 		}
+		_ = address.server.Shutdown(context.Background())
 	}
 }
