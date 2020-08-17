@@ -5,6 +5,15 @@ import (
 	"sync"
 )
 
+type ServerStatus int
+
+const (
+	NotStarted ServerStatus = 0
+	Running    ServerStatus = 1
+	Closed     ServerStatus = 2
+	Error      ServerStatus = 3
+)
+
 type Address struct {
 	Endpoints map[string]*Endpoint
 	locker    *sync.Mutex
@@ -38,9 +47,9 @@ func NewServer() Server {
 }
 
 type server struct {
-	addresses     map[string]*Address
-	locker        *sync.Mutex
-	canAddClients bool
+	addresses map[string]*Address
+	locker    *sync.Mutex
+	status    ServerStatus
 }
 
 func (s *server) RegisterAyxReader(addressName string, endpointName string) <-chan string {
@@ -136,7 +145,7 @@ func (s *server) ConnectClient(addressName string, endpointName string) (<-chan 
 	}
 
 	s.locker.Lock()
-	okToAdd := s.canAddClients
+	okToAdd := s.status == Running
 	if !okToAdd {
 		s.locker.Unlock()
 		return nil, nil, fmt.Errorf(`server is not accepting clients`)
@@ -149,6 +158,13 @@ func (s *server) ConnectClient(addressName string, endpointName string) (<-chan 
 }
 
 func (s *server) Start() {
+	s.locker.Lock()
+	defer s.locker.Unlock()
+
+	if s.status > NotStarted {
+		return
+	}
+
 	for _, address := range s.addresses {
 		for _, endpoint := range address.Endpoints {
 			for _, writer := range endpoint.AyxWriters {
@@ -159,9 +175,7 @@ func (s *server) Start() {
 			go s.readFromClientLoop(endpoint)
 		}
 	}
-	s.locker.Lock()
-	s.canAddClients = true
-	s.locker.Unlock()
+	s.status = Running
 }
 
 func (s *server) forwardAyxWriter(endpoint *Endpoint, writer *AyxWriter) {
@@ -208,7 +222,11 @@ func (s *server) readFromClientLoop(endpoint *Endpoint) {
 
 func (s *server) Shutdown() {
 	s.locker.Lock()
-	s.canAddClients = false
+	if s.status >= Closed {
+		s.locker.Unlock()
+		return
+	}
+	s.status = Closed
 	s.locker.Unlock()
 
 	for _, address := range s.addresses {

@@ -196,3 +196,12 @@ func TestSpinUpFor1Second(t *testing.T) {
 		}
 	}
 }
+
+func TestShutdownShouldBeIdempotent(t *testing.T) {
+	server := s.NewServer()
+	_, _ = server.RegisterAyxWriter(`address`, `test`)
+	server.Start()
+	server.Shutdown()
+	server.Shutdown()
+	t.Logf(`no panic happened because closed channels were closed twice, shutdown is idempotent`)
+}
