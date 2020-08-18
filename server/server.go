@@ -1,4 +1,4 @@
-package sockyts
+package server
 
 import (
 	"context"
@@ -7,36 +7,36 @@ import (
 	"sync"
 )
 
-type ServerStatus int
+type Status int
 
 const (
-	NotStarted ServerStatus = 0
-	Running    ServerStatus = 1
-	Closed     ServerStatus = 2
+	NotStarted Status = 0
+	Running    Status = 1
+	Closed     Status = 2
 )
 
-type Address struct {
-	Endpoints map[string]*Endpoint
+type serveAddress struct {
+	Endpoints map[string]*serveEndpoint
 	locker    *sync.Mutex
 	mux       *http.ServeMux
 	server    *http.Server
 }
 
-type Endpoint struct {
+type serveEndpoint struct {
 	AyxReaders   []chan string
-	AyxWriters   []*AyxWriter
+	AyxWriters   []*ayxWriter
 	AyxWriteChan chan string
 	AyxReadChan  chan string
-	Clients      map[*SockytClient]bool
+	Clients      map[*sockytClient]bool
 	locker       *sync.Mutex
 }
 
-type AyxWriter struct {
+type ayxWriter struct {
 	WriteChan chan string
 	CloseChan chan bool
 }
 
-type SockytClient struct {
+type sockytClient struct {
 	ReadChan  chan string
 	WriteChan chan string
 	index     int
@@ -44,15 +44,15 @@ type SockytClient struct {
 
 func NewServer() Server {
 	return &server{
-		addresses: map[string]*Address{},
+		addresses: map[string]*serveAddress{},
 		locker:    &sync.Mutex{},
 	}
 }
 
 type server struct {
-	addresses map[string]*Address
+	addresses map[string]*serveAddress
 	locker    *sync.Mutex
-	status    ServerStatus
+	status    Status
 }
 
 func (s *server) RegisterAyxReader(addressName string, endpointName string) <-chan string {
@@ -64,7 +64,7 @@ func (s *server) RegisterAyxReader(addressName string, endpointName string) <-ch
 }
 
 func (s *server) RegisterAyxWriter(addressName string, endpointName string) (chan<- string, <-chan bool) {
-	writer := &AyxWriter{
+	writer := &ayxWriter{
 		WriteChan: make(chan string),
 		CloseChan: make(chan bool),
 	}
@@ -74,12 +74,12 @@ func (s *server) RegisterAyxWriter(addressName string, endpointName string) (cha
 	return writer.WriteChan, writer.CloseChan
 }
 
-func (s *server) registerAddress(addressName string) *Address {
+func (s *server) registerAddress(addressName string) *serveAddress {
 	s.locker.Lock()
 	address, ok := s.addresses[addressName]
 	if !ok {
-		address = &Address{
-			Endpoints: make(map[string]*Endpoint),
+		address = &serveAddress{
+			Endpoints: make(map[string]*serveEndpoint),
 			locker:    &sync.Mutex{},
 		}
 		s.addresses[addressName] = address
@@ -88,14 +88,14 @@ func (s *server) registerAddress(addressName string) *Address {
 	return address
 }
 
-func (a *Address) registerEndpoint(endpointName string) *Endpoint {
+func (a *serveAddress) registerEndpoint(endpointName string) *serveEndpoint {
 	a.locker.Lock()
 	endpoint, ok := a.Endpoints[endpointName]
 	if !ok {
-		endpoint = &Endpoint{
+		endpoint = &serveEndpoint{
 			AyxWriteChan: make(chan string),
 			AyxReadChan:  make(chan string),
-			Clients:      make(map[*SockytClient]bool),
+			Clients:      make(map[*sockytClient]bool),
 			locker:       &sync.Mutex{},
 		}
 		a.Endpoints[endpointName] = endpoint
@@ -142,7 +142,7 @@ func (s *server) ConnectClient(addressName string, endpointName string) (<-chan 
 		return nil, nil, fmt.Errorf(`endpoint %v is not valid`, endpointName)
 	}
 
-	client := &SockytClient{
+	client := &sockytClient{
 		ReadChan:  make(chan string),
 		WriteChan: make(chan string),
 	}
@@ -180,27 +180,27 @@ func (s *server) Start() {
 			go s.writeToClientLoop(endpoint)
 			go s.readFromClientLoop(endpoint)
 		}
-		go func(a *Address) {
+		go func(a *serveAddress) {
 			_ = a.server.ListenAndServe()
 		}(address)
 	}
 	s.status = Running
 }
 
-func (s *server) forwardAyxWriter(endpoint *Endpoint, writer *AyxWriter) {
+func (s *server) forwardAyxWriter(endpoint *serveEndpoint, writer *ayxWriter) {
 	for msg := range writer.WriteChan {
 		endpoint.AyxWriteChan <- msg
 	}
 }
 
-func (s *server) forwardClientWriter(endpoint *Endpoint, client *SockytClient) {
+func (s *server) forwardClientWriter(endpoint *serveEndpoint, client *sockytClient) {
 	for msg := range client.WriteChan {
 		endpoint.AyxReadChan <- msg
 	}
 	endpoint.tryDisconnectClient(client)
 }
 
-func (endpoint *Endpoint) tryDisconnectClient(client *SockytClient) {
+func (endpoint *serveEndpoint) tryDisconnectClient(client *sockytClient) {
 	endpoint.locker.Lock()
 	_, ok := endpoint.Clients[client]
 	if ok {
@@ -210,7 +210,7 @@ func (endpoint *Endpoint) tryDisconnectClient(client *SockytClient) {
 	endpoint.locker.Unlock()
 }
 
-func (s *server) writeToClientLoop(endpoint *Endpoint) {
+func (s *server) writeToClientLoop(endpoint *serveEndpoint) {
 	for msg := range endpoint.AyxWriteChan {
 		for clientReader := range endpoint.Clients {
 			clientReader.ReadChan <- msg
@@ -221,7 +221,7 @@ func (s *server) writeToClientLoop(endpoint *Endpoint) {
 	}
 }
 
-func (s *server) readFromClientLoop(endpoint *Endpoint) {
+func (s *server) readFromClientLoop(endpoint *serveEndpoint) {
 	for msg := range endpoint.AyxReadChan {
 		for _, ayxReader := range endpoint.AyxReaders {
 			ayxReader <- msg

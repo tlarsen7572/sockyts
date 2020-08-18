@@ -1,3 +1,5 @@
-module sockyts
+module github.com/tlarsen7572/sockyts
 
 go 1.14
+
+require github.com/gorilla/websocket v1.4.2 // indirect

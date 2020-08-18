@@ -1,11 +1,11 @@
-package sockyts_test
+package server_test
 
 import (
 	"strconv"
 	"testing"
 	"time"
 )
-import s "sockyts"
+import s "github.com/tlarsen7572/sockyts/server"
 
 func TestRegisterAyxReader(t *testing.T) {
 	server := s.NewServer()

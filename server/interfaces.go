@@ -1,4 +1,4 @@
-package sockyts
+package server
 
 type Server interface {
 	RegisterAyxReader(addressName string, endpointName string) <-chan string
