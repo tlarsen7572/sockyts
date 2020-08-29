@@ -8,12 +8,23 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 )
 
-type server struct{}
+type server struct {
+	send         chan string
+	receive      chan string
+	msgsReceived chan string
+}
 
 func (s *server) ConnectClient(addressName string, endpointName string) (<-chan string, chan<- string, error) {
-	return nil, nil, nil
+	s.send = make(chan string)
+	s.receive = make(chan string)
+	s.msgsReceived = make(chan string)
+	go func() {
+		s.msgsReceived <- <-s.receive
+	}()
+	return s.send, s.receive, nil
 }
 
 func TestConnectWithoutWebsocketProtocol(t *testing.T) {
@@ -38,7 +49,7 @@ func TestConnectWithoutWebsocketProtocol(t *testing.T) {
 	t.Logf(`%v`, string(body))
 }
 
-func TestConnect(t *testing.T) {
+func TestConnectAndReceiveMsg(t *testing.T) {
 	server := &server{}
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		client.SpinUpClient(server, w, r)
@@ -52,4 +63,26 @@ func TestConnect(t *testing.T) {
 	}
 	defer conn.Close()
 
+	server.send <- `hello world`
+	okChannel := make(chan bool)
+	go func() {
+		msgType, msg, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf(`expected no error but got: %v`, err.Error())
+		}
+		msgStr := string(msg)
+		if msgStr != `hello world` {
+			t.Fatalf(`expected 'hello world' but got '%v'`, msgStr)
+		}
+		t.Logf(`got message type %v with message '%v'`, msgType, msgStr)
+		close(okChannel)
+	}()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	select {
+	case <-okChannel:
+		return
+	case <-ticker.C:
+		t.Fatalf(`test timed out after 1 second`)
+	}
 }
