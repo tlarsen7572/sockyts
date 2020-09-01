@@ -20,21 +20,34 @@ func SpinUpClient(server Server, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fromServer, _, err := server.ConnectClient(r.URL.Host, r.URL.Path)
+	fromServer, toServer, err := server.ConnectClient(r.URL.Host, r.URL.Path)
 	if err != nil {
 		_, _ = w.Write([]byte(err.Error()))
 		return
 	}
 	go func() {
-		msg := <-fromServer
-		writer, err := conn.NextWriter(websocket.TextMessage)
-		if err != nil {
-			return
+		for {
+			msg, ok := <-fromServer
+			if !ok {
+				break
+			}
+			err := conn.WriteMessage(websocket.TextMessage, []byte(msg))
+			if err != nil {
+				break
+			}
 		}
-		writer.Write([]byte(msg))
-		err = writer.Close()
-		if err != nil {
-			return
+	}()
+	go func() {
+		for {
+			messageType, msg, err := conn.ReadMessage()
+			if err != nil {
+				break
+			}
+			if messageType != websocket.TextMessage {
+				break
+			}
+			msgStr := string(msg)
+			toServer <- msgStr
 		}
 	}()
 }
